@@ -1,0 +1,31 @@
+name: PR Preview
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+permissions:
+  contents: write          # push preview to gh-pages
+  pull-requests: write     # post the preview-URL comment
+concurrency:
+  group: preview-${{ github.event.number }}
+  cancel-in-progress: true
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: github.event.action != 'closed'
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+        if: github.event.action != 'closed'
+      - run: npm run build:app
+        if: github.event.action != 'closed'
+      - name: Deploy / remove preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: ./dist
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          action: auto       # deploy on open/sync, remove on close
