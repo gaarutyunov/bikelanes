@@ -1,19 +1,33 @@
 import { defineConfig, type Plugin } from 'vite';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, createReadStream } from 'node:fs';
 import { resolve } from 'node:path';
 
-// Copy the committed /data artifacts into dist/data so the published site can
-// fetch them with relative URLs (SPEC §8, §16, §17.4). They live at the repo
-// root (not /public) per the spec directory layout.
-function copyData(): Plugin {
+// The /data artifacts live at the repo root (not /public) per the spec layout
+// (SPEC §8, §16). On build, copy them into dist/data so the published site can
+// fetch them with relative URLs (§17.4). On dev, serve them from the root.
+function dataPlugin(): Plugin {
+  const root = resolve(__dirname, 'data');
   return {
-    name: 'copy-data',
-    apply: 'build',
+    name: 'bikenav-data',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url ?? '').split('?')[0];
+        if (!path.startsWith('/data/')) return next();
+        const file = resolve(__dirname, '.' + path);
+        if (!file.startsWith(root) || !existsSync(file)) return next();
+        const type = file.endsWith('.json')
+          ? 'application/json'
+          : file.endsWith('.geojson')
+            ? 'application/geo+json'
+            : 'application/octet-stream';
+        res.setHeader('Content-Type', type);
+        createReadStream(file).pipe(res);
+      });
+    },
     closeBundle() {
-      const src = resolve(__dirname, 'data');
       const dest = resolve(__dirname, 'dist/data');
-      if (existsSync(src)) {
-        cpSync(src, dest, { recursive: true });
+      if (existsSync(root)) {
+        cpSync(root, dest, { recursive: true });
         this.warn?.(`copied data/ → dist/data`);
       } else {
         this.warn?.('data/ not found — run `npm run build:sample-data` or `npm run build:data`');
@@ -26,7 +40,7 @@ function copyData(): Plugin {
 // production Pages path and at every PR-preview subpath (SPEC §17.4).
 export default defineConfig({
   base: './',
-  plugins: [copyData()],
+  plugins: [dataPlugin()],
   build: {
     target: 'es2022',
     sourcemap: false,

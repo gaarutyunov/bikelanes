@@ -68,11 +68,20 @@ class App {
 
     verifyArtifacts(manifest).catch(() => undefined);
 
+    // Resolve artifact URLs to absolute against the document. Workers resolve
+    // relative fetch() URLs against their *own* script URL, not the page, so a
+    // bare './data/…' would 404 inside a worker (in dev and in dist).
+    const url = (p: string) => new URL(p, document.baseURI).href;
+
     // Load graph + search index in parallel; map renders independently (M1).
     const [graphInfo] = await Promise.all([
-      this.routing.load(`${DATA_BASE}graph.bin`),
+      this.routing.load(url(`${DATA_BASE}graph.bin`)),
       this.search
-        .load(`${DATA_BASE}search/index.json`, `${DATA_BASE}search/coords.bin`, `${DATA_BASE}search/meta.json`)
+        .load(
+          url(`${DATA_BASE}search/index.json`),
+          url(`${DATA_BASE}search/coords.bin`),
+          url(`${DATA_BASE}search/meta.json`),
+        )
         .catch(() => 0),
     ]);
 
