@@ -10,6 +10,7 @@
     "build": "npm run build:app",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "fetch:data": "tsx pipeline/fetch.ts",
     "build:data": "tsx pipeline/index.ts",
     "build:sample-data": "tsx pipeline/sample.ts",
     "deploy": "npm run build:app"

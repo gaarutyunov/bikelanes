@@ -39,11 +39,19 @@ re-runnable pipeline (`/pipeline`) and committed under `/data` as regular Git
 files (never Git LFS — GitHub Pages does not serve LFS objects).
 
 - `npm run build:sample-data` — generate a small synthetic central-Málaga
-  dataset so the app runs without the full toolchain. **This is the committed
-  default.**
-- `npm run build:data` — the real build. Run `tsx pipeline/fetch.ts` first to
-  download municipal + OSM sources into `pipeline/raw/` (build-time only; needs
-  network, and GDAL/tippecanoe/Planetiler for reprojection and tiles).
+  dataset so the app runs without network access. **This is the committed
+  default** until the real CI build runs.
+- `npm run build:data` — the real build (reads `pipeline/raw/`, populated by
+  `npm run fetch:data`). Needs outbound network for the municipal portal +
+  OSM/Overpass; optional GDAL/tippecanoe/Planetiler for reprojection and tiles.
+
+### Real data is built by CI, not by hand
+
+The `.github/workflows/build-data.yml` workflow runs `fetch:data` + `build:data`
+on **GitHub's runners** (which have the network access a local sandbox may not),
+on a weekly schedule and on manual dispatch (Actions → “Build data” → Run
+workflow). It commits the refreshed `/data/*` back to the repo and deploys the
+site in the same job. Regular pushes stay app-only and fast.
 
 Artifacts (`SPEC.md` §8):
 
