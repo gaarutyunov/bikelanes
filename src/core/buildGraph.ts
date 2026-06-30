@@ -4,9 +4,17 @@
 // tolerance) → class-tag → drop excluded → measure length → emit nodes+edges.
 
 import type { Feature, FeatureCollection, LineString } from 'geojson';
+import Flatbush from 'flatbush';
 import { CLASS_ID, EDGE_CLASSES, EXCLUDED_HIGHWAYS, type EdgeClass } from './classes';
 import type { GraphEdge, GraphNode } from './graphFormat';
 import { haversine } from './geo';
+
+const segBox = (s: { p0: [number, number]; p1: [number, number] }) => ({
+  minX: Math.min(s.p0[0], s.p1[0]),
+  minY: Math.min(s.p0[1], s.p1[1]),
+  maxX: Math.max(s.p0[0], s.p1[0]),
+  maxY: Math.max(s.p0[1], s.p1[1]),
+});
 
 export interface BuildOptions {
   tolerance_m?: number; // snap tolerance, default 12 m (SPEC §6 Stage 2.4)
@@ -136,36 +144,63 @@ export function buildGraph(fc: FeatureCollection, opts: BuildOptions = {}): Buil
   // 2. Node the topology: split segments at interior intersections (X crossings)
   //    AND at any other segment's endpoint that lands on this segment's interior
   //    (T-junctions) — turf.lineSplit handles both; we replicate that here.
+  //    Spatial indexes prune candidate pairs so this scales to city-size input.
   const splitParams: number[][] = segs.map(() => []);
-  for (let i = 0; i < segs.length; i++) {
-    for (let j = i + 1; j < segs.length; j++) {
-      const hit = intersectParams(segs[i].p0, segs[i].p1, segs[j].p0, segs[j].p1);
-      if (hit) {
-        splitParams[i].push(hit.t);
-        splitParams[j].push(hit.u);
+  if (segs.length > 0) {
+    const segIndex = new Flatbush(segs.length);
+    for (const s of segs) {
+      const b = segBox(s);
+      segIndex.add(b.minX, b.minY, b.maxX, b.maxY);
+    }
+    segIndex.finish();
+
+    // X crossings: only test bbox-overlapping pairs.
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const b = segBox(s);
+      for (const j of segIndex.search(b.minX, b.minY, b.maxX, b.maxY)) {
+        if (j <= i) continue;
+        const hit = intersectParams(s.p0, s.p1, segs[j].p0, segs[j].p1);
+        if (hit) {
+          splitParams[i].push(hit.t);
+          splitParams[j].push(hit.u);
+        }
       }
     }
-  }
-  // T-junctions: project every distinct endpoint onto every segment interior.
-  const verts: [number, number][] = [];
-  const vertSeen = new Set<string>();
-  for (const s of segs) {
-    for (const p of [s.p0, s.p1]) {
-      const key = `${p[0]},${p[1]}`;
-      if (!vertSeen.has(key)) {
-        vertSeen.add(key);
-        verts.push(p);
+
+    // T-junctions: index distinct vertices, split a segment where a foreign
+    // vertex lands on its interior.
+    const verts: [number, number][] = [];
+    const vertSeen = new Set<string>();
+    for (const s of segs) {
+      for (const p of [s.p0, s.p1]) {
+        const key = `${p[0]},${p[1]}`;
+        if (!vertSeen.has(key)) {
+          vertSeen.add(key);
+          verts.push(p);
+        }
       }
     }
-  }
-  const T_EPS_M = 1.0; // a vertex this close to a segment interior splits it
-  for (let i = 0; i < segs.length; i++) {
-    const s = segs[i];
-    for (const v of verts) {
-      if ((v[0] === s.p0[0] && v[1] === s.p0[1]) || (v[0] === s.p1[0] && v[1] === s.p1[1])) continue;
-      const proj = projectParam(s.p0, s.p1, v);
-      if (proj && proj.t > 1e-9 && proj.t < 1 - 1e-9 && proj.dist_m <= T_EPS_M) {
-        splitParams[i].push(proj.t);
+    const vIndex = new Flatbush(verts.length);
+    for (const v of verts) vIndex.add(v[0], v[1], v[0], v[1]);
+    vIndex.finish();
+    const T_EPS_M = 1.0; // a vertex this close to a segment interior splits it
+    const tEpsDeg = T_EPS_M / 80000; // generous degree padding (covers lon at Málaga lat)
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const b = segBox(s);
+      for (const vi of vIndex.search(
+        b.minX - tEpsDeg,
+        b.minY - tEpsDeg,
+        b.maxX + tEpsDeg,
+        b.maxY + tEpsDeg,
+      )) {
+        const v = verts[vi];
+        if ((v[0] === s.p0[0] && v[1] === s.p0[1]) || (v[0] === s.p1[0] && v[1] === s.p1[1])) continue;
+        const proj = projectParam(s.p0, s.p1, v);
+        if (proj && proj.t > 1e-9 && proj.t < 1 - 1e-9 && proj.dist_m <= T_EPS_M) {
+          splitParams[i].push(proj.t);
+        }
       }
     }
   }
@@ -209,8 +244,8 @@ export function buildGraph(fc: FeatureCollection, opts: BuildOptions = {}): Buil
   }
 
   // 4. Snap: cluster nodes within tolerance, remapping to a representative.
-  //    O(n²) — fine for sample/import sizes; the offline pipeline calls this on
-  //    pre-cleaned municipal data. (SPEC §6 Stage 2.4, open question §20.1)
+  //    A spatial index restricts each node to nearby candidates (SPEC §6 Stage
+  //    2.4 "node-snap pass over an rbush/flatbush spatial index"; §20.1).
   const remap = new Int32Array(nodes.length);
   for (let i = 0; i < nodes.length; i++) remap[i] = i;
   const findRep = (x: number): number => {
@@ -220,11 +255,17 @@ export function buildGraph(fc: FeatureCollection, opts: BuildOptions = {}): Buil
     }
     return x;
   };
-  if (tolerance > 0) {
+  if (tolerance > 0 && nodes.length > 0) {
+    const nIndex = new Flatbush(nodes.length);
+    for (const n of nodes) nIndex.add(n.lon, n.lat, n.lon, n.lat);
+    nIndex.finish();
     for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        if (findRep(i) === findRep(j)) continue;
-        const d = haversine([nodes[i].lon, nodes[i].lat], [nodes[j].lon, nodes[j].lat]);
+      const ni = nodes[i];
+      const dLat = tolerance / 110540;
+      const dLon = tolerance / (111320 * Math.max(0.1, Math.cos((ni.lat * Math.PI) / 180)));
+      for (const j of nIndex.search(ni.lon - dLon, ni.lat - dLat, ni.lon + dLon, ni.lat + dLat)) {
+        if (j <= i || findRep(i) === findRep(j)) continue;
+        const d = haversine([ni.lon, ni.lat], [nodes[j].lon, nodes[j].lat]);
         if (d > 0 && d <= tolerance) remap[findRep(j)] = findRep(i);
       }
     }

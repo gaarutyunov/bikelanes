@@ -20,6 +20,21 @@ jobs:
           cache: npm
       - run: npm ci
         if: github.event.action != 'closed'
+
+      # Build real data (cached weekly) so previews are faithful. (SPEC §17.2)
+      - id: stamp
+        if: github.event.action != 'closed'
+        run: echo "week=$(date +%Y-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        if: github.event.action != 'closed'
+        with:
+          path: pipeline/raw
+          key: malaga-raw-${{ steps.stamp.outputs.week }}
+      - run: npm run fetch:data
+        if: github.event.action != 'closed'
+      - run: npm run build:data
+        if: github.event.action != 'closed'
+
       - run: npm run build:app
         if: github.event.action != 'closed'
       - name: Deploy / remove preview

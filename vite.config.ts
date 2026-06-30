@@ -30,7 +30,7 @@ function dataPlugin(): Plugin {
         cpSync(root, dest, { recursive: true });
         this.warn?.(`copied data/ → dist/data`);
       } else {
-        this.warn?.('data/ not found — run `npm run build:sample-data` or `npm run build:data`');
+        this.warn?.('data/ not found — run `npm run fetch:data && npm run build:data` (CI does this automatically)');
       }
     },
   };

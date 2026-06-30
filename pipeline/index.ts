@@ -92,7 +92,7 @@ function buildAddresses(): AddressInput[] {
 
 async function main(): Promise<void> {
   if (!rawExists('carriles-bici.geojson')) {
-    console.error('No raw data found. Run `tsx pipeline/fetch.ts` first, or use `npm run build:sample-data`.');
+    console.error('No raw data found. Run `npm run fetch:data` first (needs network access).');
     process.exit(1);
   }
   console.log('Stage 2/3 — building routing graph…');

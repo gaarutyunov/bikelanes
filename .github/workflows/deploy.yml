@@ -17,10 +17,23 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run build:app          # data artifacts already committed
+
+      # Build the real Málaga artifacts on CI (it has the network access the
+      # municipal portal + Overpass need). Raw sources are cached weekly so most
+      # runs skip the downloads. (SPEC §17.2)
+      - id: stamp
+        run: echo "week=$(date +%Y-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: pipeline/raw
+          key: malaga-raw-${{ steps.stamp.outputs.week }}
+      - run: npm run fetch:data
+      - run: npm run build:data
+
+      - run: npm run build:app
       - name: Publish to gh-pages root
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
-          keep_files: true              # preserve pr-preview/ subdirectories
+          keep_files: true # preserve pr-preview/ subdirectories

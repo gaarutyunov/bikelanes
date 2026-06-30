@@ -5,3 +5,4 @@ pipeline/raw/
 .DS_Store
 .vite/
 npm-debug.log*
+/data/

@@ -1,6 +1,6 @@
-// Stage 5 — build display tiles (SPEC §6 Stage 5). Requires Planetiler/tippecanoe
-// installed locally; build-time only. If the tools are absent the sample build
-// falls back to the bikelanes.geojson display layer instead of PMTiles.
+// Stage 5 — build display tiles (SPEC §6 Stage 5). Requires Planetiler/tippecanoe;
+// build-time only. If the tools are absent the pipeline ships the
+// bikelanes.geojson display layer instead of PMTiles.
 
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';

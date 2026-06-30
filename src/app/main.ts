@@ -51,7 +51,10 @@ class App {
     try {
       manifest = await fetchJson<Manifest>(`${DATA_BASE}manifest.json`);
     } catch {
-      this.setStatus('Could not load /data/manifest.json. Run `npm run build:sample-data`.', 'error');
+      this.setStatus(
+        'Could not load /data. CI builds it on deploy; for local dev run `npm run fetch:data && npm run build:data`.',
+        'error',
+      );
       return;
     }
 

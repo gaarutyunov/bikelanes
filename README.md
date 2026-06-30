@@ -25,33 +25,38 @@ dependencies**. See [`SPEC.md`](./SPEC.md) for the full technical specification.
 
 ```bash
 npm install
-npm run build:sample-data   # generate the committed /data/* sample artifacts
+npm run fetch:data          # download municipal + OSM sources into pipeline/raw
+npm run build:data          # build /data/* artifacts from them (needs network)
 npm run dev                 # http://localhost:5173
 ```
 
-`npm run build:app` type-checks and bundles the site into `dist/` (and copies
-`/data` into `dist/data`). `npm run build` is an alias.
+`/data` is **not committed** — it's generated. In CI it's built on every deploy;
+for local dev run `fetch:data` + `build:data` once (both need outbound network
+for the Málaga portal + Overpass). `npm run build:app` type-checks and bundles
+the site into `dist/` (and copies `/data` into `dist/data`). `npm run build` is
+an alias.
 
 ## Data pipeline
 
 The routing graph, search index and display layers are produced by an offline,
-re-runnable pipeline (`/pipeline`) and committed under `/data` as regular Git
-files (never Git LFS — GitHub Pages does not serve LFS objects).
+re-runnable pipeline (`/pipeline`). They are **built by CI and published into
+`dist/`, never committed and never hand-authored** — there is no synthetic
+sample dataset.
 
-- `npm run build:sample-data` — generate a small synthetic central-Málaga
-  dataset so the app runs without network access. **This is the committed
-  default** until the real CI build runs.
-- `npm run build:data` — the real build (reads `pipeline/raw/`, populated by
-  `npm run fetch:data`). Needs outbound network for the municipal portal +
-  OSM/Overpass; optional GDAL/tippecanoe/Planetiler for reprojection and tiles.
+- `npm run fetch:data` — download the municipal portal + OSM/Overpass sources
+  into `pipeline/raw/` (cached; skips files already present).
+- `npm run build:data` — build `/data/*` from the raw sources. Spatial-index
+  noding/snapping keeps this fast even at city scale. Optional
+  GDAL/tippecanoe/Planetiler enable reprojection and PMTiles; without them the
+  pipeline ships the `bikelanes.geojson` display layer.
 
 ### Real data is built by CI, not by hand
 
-The `.github/workflows/build-data.yml` workflow runs `fetch:data` + `build:data`
-on **GitHub's runners** (which have the network access a local sandbox may not),
-on a weekly schedule and on manual dispatch (Actions → “Build data” → Run
-workflow). It commits the refreshed `/data/*` back to the repo and deploys the
-site in the same job. Regular pushes stay app-only and fast.
+Both `deploy.yml` and `preview.yml` run `fetch:data` + `build:data` before
+`build:app` on **GitHub's runners** (which have the network access a local
+sandbox may not). Raw sources are cached weekly, so most runs skip the
+downloads. This is why the data sources my development sandbox couldn't reach
+get resolved automatically in CI.
 
 Artifacts (`SPEC.md` §8):
 
