@@ -249,7 +249,7 @@ class App {
         profile: this.profile,
       });
       this.route = result;
-      this.map.setRoute(result.geometry);
+      this.map.setRoute(result.geometry, result.segments);
       this.renderRoutePanel(result);
       this.session.setRoute(this.toPlan(result));
       this.setStatus('');
@@ -379,7 +379,7 @@ class App {
         profile: this.profile,
       });
       this.route = result;
-      this.map.setRoute(result.geometry);
+      this.map.setRoute(result.geometry, result.segments);
       this.session.setRoute(this.toPlan(result));
       this.showOffRoute(false);
       this.setStatus('Rerouted.', 'ok');

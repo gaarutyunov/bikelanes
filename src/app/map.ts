@@ -3,12 +3,18 @@
 
 import maplibregl, { type StyleSpecification, type LngLatLike } from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
-import type { Feature, LineString } from 'geojson';
+import type { Feature, FeatureCollection, LineString } from 'geojson';
 import type { Manifest } from '../core/types';
 
 let protocolRegistered = false;
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
+
+// Surface palette: bike infrastructure in Málaga's vine-red lane colour, roads
+// in blue (SPEC §10 / §21).
+const BIKE_COLOR = '#9b1c3d';
+const ROAD_COLOR = '#1462d6';
+const CONNECTOR_COLOR = '#c98a00';
 
 export class BikeMap {
   map: maplibregl.Map;
@@ -81,7 +87,7 @@ export class BikeMap {
         type: 'line',
         source: 'bikelanes',
         'source-layer': 'bikelanes',
-        paint: { 'line-color': '#1b8a5a', 'line-width': 2.5 },
+        paint: { 'line-color': BIKE_COLOR, 'line-width': 2.5 },
       });
     } else {
       sources.bikelanes = { type: 'geojson', data: `${dataBase}${manifest.bikelanes.path}` };
@@ -90,16 +96,18 @@ export class BikeMap {
         type: 'line',
         source: 'bikelanes',
         paint: {
+          // Bike lanes in vine red, roads in blue, connectors amber (§10).
           'line-color': [
             'match',
             ['get', 'kind'],
             'bike',
-            '#1b8a5a',
+            BIKE_COLOR,
             'connector',
-            '#c98a00',
-            '#9aa3ad',
+            CONNECTOR_COLOR,
+            ROAD_COLOR,
           ],
-          'line-width': ['match', ['get', 'kind'], 'bike', 3, 1.5],
+          'line-width': ['match', ['get', 'kind'], 'bike', 3, 1],
+          'line-opacity': ['match', ['get', 'kind'], 'bike', 0.9, 0.45],
         },
       });
     }
@@ -114,7 +122,12 @@ export class BikeMap {
       type: 'line',
       source: 'route',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#1462d6', 'line-width': 5, 'line-opacity': 0.85 },
+      paint: {
+        // Colour each route run by surface: bike infra vine-red, roads blue.
+        'line-color': ['match', ['get', 'kind'], 'bike', BIKE_COLOR, ROAD_COLOR],
+        'line-width': 5,
+        'line-opacity': 0.9,
+      },
     });
     this.map.addLayer({
       id: 'progress',
@@ -130,11 +143,24 @@ export class BikeMap {
     else this.map.on('load', cb);
   }
 
-  setRoute(geometry: LineString | null): void {
+  /**
+   * Render the route. When `segments` (bike-vs-road runs) are supplied the line
+   * is coloured by surface; otherwise it falls back to a single road-coloured
+   * line (e.g. a history track without per-surface data).
+   */
+  setRoute(geometry: LineString | null, segments?: FeatureCollection | null): void {
     const src = this.map.getSource('route') as maplibregl.GeoJSONSource | undefined;
     if (!src) return;
-    src.setData(geometry ? ({ type: 'Feature', properties: {}, geometry } as Feature) : EMPTY_FC);
-    if (geometry && geometry.coordinates.length > 1) {
+    if (!geometry) {
+      src.setData(EMPTY_FC);
+      return;
+    }
+    if (segments && segments.features.length > 0) {
+      src.setData(segments);
+    } else {
+      src.setData({ type: 'Feature', properties: { kind: 'road' }, geometry } as Feature);
+    }
+    if (geometry.coordinates.length > 1) {
       const b = new maplibregl.LngLatBounds();
       for (const c of geometry.coordinates) b.extend(c as [number, number]);
       this.map.fitBounds(b, { padding: 60, maxZoom: 16 });

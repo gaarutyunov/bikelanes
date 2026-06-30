@@ -1,7 +1,7 @@
 // Shared types used across the app, workers, history and pipeline.
 
 import type { EdgeClass } from './classes';
-import type { LineString } from 'geojson';
+import type { FeatureCollection, LineString } from 'geojson';
 
 export type EtaSource = 'personal-perclass' | 'personal-overall' | 'prior';
 
@@ -37,6 +37,8 @@ export interface RouteRequest {
 
 export interface RouteResult {
   geometry: LineString;
+  // Route split into bike-vs-road runs for surface-coloured rendering (§10).
+  segments: FeatureCollection;
   distance_m: number;
   eta_s: number;
   etaSource: EtaSource;

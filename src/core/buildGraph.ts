@@ -303,10 +303,133 @@ export function buildGraph(fc: FeatureCollection, opts: BuildOptions = {}): Buil
     b: compactId(e.b),
   }));
 
-  const components = countComponents(compactNodes.length, compactEdges);
+  // 7. Snap dangling endpoints onto the nearest edge within tolerance — connects
+  //    parallel infrastructure (e.g. a segregated cycleway ending mid-block next
+  //    to a road) that shares no exact vertex (SPEC §6.2.4). This is the main
+  //    de-fragmentation pass; node-to-node clustering alone misses these.
+  const snapped = snapDanglingToEdges(compactNodes, compactEdges, tolerance);
+
+  const components = countComponents(snapped.nodes.length, snapped.edges);
   if (components > 1) warnings.push(`${components} disconnected components.`);
 
-  return { nodes: compactNodes, edges: compactEdges, components, warnings };
+  return { nodes: snapped.nodes, edges: snapped.edges, components, warnings };
+}
+
+// Length (m) of a straight segment a→b between params t0 and t1.
+function subLen(a: GraphNode, b: GraphNode, t0: number, t1: number): number {
+  const p0: [number, number] = [a.lon + (b.lon - a.lon) * t0, a.lat + (b.lat - a.lat) * t0];
+  const p1: [number, number] = [a.lon + (b.lon - a.lon) * t1, a.lat + (b.lat - a.lat) * t1];
+  return haversine(p0, p1);
+}
+
+function snapDanglingToEdges(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  tolerance: number,
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  if (tolerance <= 0 || edges.length === 0) return { nodes, edges };
+
+  const deg = new Int32Array(nodes.length);
+  for (const e of edges) {
+    deg[e.a]++;
+    deg[e.b]++;
+  }
+
+  const fb = new Flatbush(edges.length);
+  for (const e of edges) {
+    const a = nodes[e.a];
+    const b = nodes[e.b];
+    fb.add(
+      Math.min(a.lon, b.lon),
+      Math.min(a.lat, b.lat),
+      Math.max(a.lon, b.lon),
+      Math.max(a.lat, b.lat),
+    );
+  }
+  fb.finish();
+
+  const tolLat = tolerance / 110540;
+  const cuts = new Map<number, { t: number; node: number }[]>(); // edge index → cut points
+  const directConnectors: GraphEdge[] = []; // snap straight to an existing endpoint
+
+  for (let n = 0; n < nodes.length; n++) {
+    if (deg[n] !== 1) continue; // only dangling endpoints
+    const pn = nodes[n];
+    const tolLon = tolerance / (111320 * Math.max(0.1, Math.cos((pn.lat * Math.PI) / 180)));
+    let best: { ei: number; t: number; dist: number } | null = null;
+    for (const ei of fb.search(pn.lon - tolLon, pn.lat - tolLat, pn.lon + tolLon, pn.lat + tolLat)) {
+      const e = edges[ei];
+      if (e.a === n || e.b === n) continue;
+      const a = nodes[e.a];
+      const b = nodes[e.b];
+      const proj = projectParam([a.lon, a.lat], [b.lon, b.lat], [pn.lon, pn.lat]);
+      if (!proj) continue;
+      const t = Math.max(0, Math.min(1, proj.t));
+      const lon = a.lon + (b.lon - a.lon) * t;
+      const lat = a.lat + (b.lat - a.lat) * t;
+      const dist = haversine([pn.lon, pn.lat], [lon, lat]);
+      if (dist <= tolerance && (!best || dist < best.dist)) best = { ei, t, dist };
+    }
+    if (!best || best.dist < 1e-6) continue;
+    const e = edges[best.ei];
+    if (best.t <= 1e-6) {
+      directConnectors.push(connector(n, e.a, nodes));
+    } else if (best.t >= 1 - 1e-6) {
+      directConnectors.push(connector(n, e.b, nodes));
+    } else {
+      const list = cuts.get(best.ei) ?? [];
+      list.push({ t: best.t, node: n });
+      cuts.set(best.ei, list);
+    }
+  }
+
+  if (cuts.size === 0 && directConnectors.length === 0) return { nodes, edges };
+
+  const outNodes = nodes.slice();
+  const outEdges: GraphEdge[] = [];
+  for (let ei = 0; ei < edges.length; ei++) {
+    const e = edges[ei];
+    const cs = cuts.get(ei);
+    if (!cs) {
+      outEdges.push(e);
+      continue;
+    }
+    cs.sort((x, y) => x.t - y.t);
+    const a = nodes[e.a];
+    const b = nodes[e.b];
+    let prevId = e.a;
+    let prevT = 0;
+    for (const c of cs) {
+      const lon = a.lon + (b.lon - a.lon) * c.t;
+      const lat = a.lat + (b.lat - a.lat) * c.t;
+      const mid = outNodes.length;
+      outNodes.push({ lon, lat });
+      outEdges.push({ a: prevId, b: mid, len: subLen(a, b, prevT, c.t), cls: e.cls, one: e.one });
+      const dn = nodes[c.node];
+      outEdges.push({
+        a: c.node,
+        b: mid,
+        len: haversine([dn.lon, dn.lat], [lon, lat]),
+        cls: CLASS_ID.connector,
+        one: 0,
+      });
+      prevId = mid;
+      prevT = c.t;
+    }
+    outEdges.push({ a: prevId, b: e.b, len: subLen(a, b, prevT, 1), cls: e.cls, one: e.one });
+  }
+  outEdges.push(...directConnectors);
+  return { nodes: outNodes, edges: outEdges };
+}
+
+function connector(from: number, to: number, nodes: GraphNode[]): GraphEdge {
+  return {
+    a: from,
+    b: to,
+    len: haversine([nodes[from].lon, nodes[from].lat], [nodes[to].lon, nodes[to].lat]),
+    cls: CLASS_ID.connector,
+    one: 0,
+  };
 }
 
 export function countComponents(nodeCount: number, edges: GraphEdge[]): number {

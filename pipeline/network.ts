@@ -105,6 +105,34 @@ function clsFromTags(tags: Record<string, string>): string | null {
   return map[hw] ?? null;
 }
 
+// ---- Municipal portal (CKAN) resolution ------------------------------------
+
+const MALAGA_PORTAL = 'https://datosabiertos.malaga.eu';
+
+interface CkanResource {
+  format?: string;
+  name?: string;
+  url?: string;
+}
+
+/**
+ * Resolve a dataset's GeoJSON (EPSG:4326) download URL via the CKAN API by
+ * stable dataset slug — robust to the resource path/filename changing. Returns
+ * null if the API or a matching resource isn't available (best-effort).
+ */
+export async function ckanGeojson4326Url(slug: string): Promise<string | null> {
+  const res = await fetch(`${MALAGA_PORTAL}/api/3/action/package_show?id=${slug}`, {
+    headers: { 'User-Agent': OVERPASS_UA, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`CKAN package_show ${slug} → ${res.status}`);
+  const json = (await res.json()) as { result?: { resources?: CkanResource[] } };
+  const resources = json.result?.resources ?? [];
+  const isGeo = (r: CkanResource) => /geojson/i.test(r.format ?? '') || /\.geojson\b/i.test(r.url ?? '');
+  const is4326 = (r: CkanResource) => /4326/.test(`${r.name ?? ''} ${r.url ?? ''}`);
+  const pick = resources.find((r) => isGeo(r) && is4326(r)) ?? resources.find(isGeo);
+  return pick?.url ?? null;
+}
+
 // ---- OSM addresses (replaces the fragile municipal SIC Número/Vial join) ----
 
 export function overpassAddressQuery(b: Bbox): string {

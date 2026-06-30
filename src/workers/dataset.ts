@@ -223,30 +223,58 @@ export class Dataset {
     const coords: [number, number][] = [];
     const classBreakdown: Partial<Record<EdgeClass, number>> = {};
     const steps: RouteStep[] = [];
+    const segments: SegmentFeature[] = [];
     let distance = 0;
     let roadDistance = 0;
 
-    coords.push([nodesInOrder[0].data.lon, nodesInOrder[0].data.lat]);
+    const first: [number, number] = [nodesInOrder[0].data.lon, nodesInOrder[0].data.lat];
+    coords.push(first);
+    // Accumulate consecutive same-surface edges into one polyline feature so the
+    // route renders as continuous bike-vs-road coloured runs (SPEC §10).
+    let run: [number, number][] = [first];
+    let runKind: 'bike' | 'road' | null = null;
+    const flush = () => {
+      if (runKind && run.length > 1) {
+        segments.push({
+          type: 'Feature',
+          properties: { kind: runKind },
+          geometry: { type: 'LineString', coordinates: run.map((c) => [c[0], c[1]]) },
+        });
+      }
+    };
+
     for (let i = 1; i < nodesInOrder.length; i++) {
       const u = nodesInOrder[i - 1];
       const v = nodesInOrder[i];
-      coords.push([v.data.lon, v.data.lat]);
+      const p: [number, number] = [v.data.lon, v.data.lat];
+      coords.push(p);
       const link = this.graph.getLink(u.id, v.id) ?? this.graph.getLink(v.id, u.id);
       const data: LinkData | undefined = link?.data;
       const len = data ? data.len : haversine([u.data.lon, u.data.lat], [v.data.lon, v.data.lat]);
       const cls = classFromId(data ? data.cls : 10);
+      const kind: 'bike' | 'road' = isBike(cls) ? 'bike' : 'road';
       distance += len;
-      if (!isBike(cls)) roadDistance += len;
+      if (kind === 'road') roadDistance += len;
       classBreakdown[cls] = (classBreakdown[cls] ?? 0) + len;
       const last = steps[steps.length - 1];
       if (last && last.cls === cls) last.distance_m += len;
       else steps.push({ cls, distance_m: len, text: '' });
+
+      if (runKind === null) runKind = kind;
+      if (kind !== runKind) {
+        flush();
+        run = [[u.data.lon, u.data.lat]]; // start new run at the junction
+        runKind = kind;
+      }
+      run.push(p);
     }
+    flush();
     for (const s of steps) s.text = stepText(s.cls, s.distance_m);
 
     const { eta_s, etaSource } = routeEta(classBreakdown, profile);
     return {
       geometry: { type: 'LineString', coordinates: coords },
+      segments: { type: 'FeatureCollection', features: segments },
       distance_m: distance,
       eta_s,
       etaSource,
@@ -256,6 +284,12 @@ export class Dataset {
     };
   }
 }
+
+type SegmentFeature = {
+  type: 'Feature';
+  properties: { kind: 'bike' | 'road' };
+  geometry: { type: 'LineString'; coordinates: number[][] };
+};
 
 const CLASS_LABEL: Record<EdgeClass, string> = {
   cycleway: 'segregated cycle track',
