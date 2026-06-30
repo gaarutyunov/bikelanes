@@ -329,11 +329,24 @@ function snapDanglingToEdges(
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   if (tolerance <= 0 || edges.length === 0) return { nodes, edges };
 
-  const deg = new Int32Array(nodes.length);
-  for (const e of edges) {
-    deg[e.a]++;
-    deg[e.b]++;
-  }
+  // Component membership (union-find). We bridge a node to a *different*
+  // component's edge within tolerance, then union them — this merges stranded
+  // sub-networks (parallel cycleways, isolated paths), not just degree-1 stubs.
+  const parent = new Int32Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) parent[i] = i;
+  const find = (x: number): number => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+  for (const e of edges) union(e.a, e.b);
 
   const fb = new Flatbush(edges.length);
   for (const e of edges) {
@@ -353,13 +366,13 @@ function snapDanglingToEdges(
   const directConnectors: GraphEdge[] = []; // snap straight to an existing endpoint
 
   for (let n = 0; n < nodes.length; n++) {
-    if (deg[n] !== 1) continue; // only dangling endpoints
     const pn = nodes[n];
     const tolLon = tolerance / (111320 * Math.max(0.1, Math.cos((pn.lat * Math.PI) / 180)));
     let best: { ei: number; t: number; dist: number } | null = null;
     for (const ei of fb.search(pn.lon - tolLon, pn.lat - tolLat, pn.lon + tolLon, pn.lat + tolLat)) {
       const e = edges[ei];
       if (e.a === n || e.b === n) continue;
+      if (find(e.a) === find(n)) continue; // already in the same component
       const a = nodes[e.a];
       const b = nodes[e.b];
       const proj = projectParam([a.lon, a.lat], [b.lon, b.lat], [pn.lon, pn.lat]);
@@ -370,16 +383,20 @@ function snapDanglingToEdges(
       const dist = haversine([pn.lon, pn.lat], [lon, lat]);
       if (dist <= tolerance && (!best || dist < best.dist)) best = { ei, t, dist };
     }
-    if (!best || best.dist < 1e-6) continue;
+    if (!best) continue;
     const e = edges[best.ei];
+    if (find(e.a) === find(n)) continue; // merged via an earlier bridge this pass
     if (best.t <= 1e-6) {
       directConnectors.push(connector(n, e.a, nodes));
+      union(n, e.a);
     } else if (best.t >= 1 - 1e-6) {
       directConnectors.push(connector(n, e.b, nodes));
+      union(n, e.b);
     } else {
       const list = cuts.get(best.ei) ?? [];
       list.push({ t: best.t, node: n });
       cuts.set(best.ei, list);
+      union(n, e.a);
     }
   }
 
