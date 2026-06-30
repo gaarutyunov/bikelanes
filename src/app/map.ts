@@ -103,7 +103,7 @@ export class BikeMap {
         },
       });
     }
-    return { version: 8, glyphs: undefined, sources, layers } as StyleSpecification;
+    return { version: 8, sources, layers } as StyleSpecification;
   }
 
   private addOverlays(): void {
