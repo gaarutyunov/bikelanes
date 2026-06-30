@@ -43,11 +43,17 @@ function clsFromTags(tags: Record<string, string>): string | null {
   const hw = tags.highway;
   if (!hw) return null;
   if (hw === 'motorway' || hw === 'motorway_link') return null;
-  if (tags.bicycle === 'no' || tags.access === 'no') return null;
+  if (tags.bicycle === 'no' || tags.access === 'no' || tags.access === 'private') return null;
+  if (hw === 'cycleway') return 'cycleway';
+  // Bike-priority streets and on-road cycle lanes tagged on a road way.
+  if (tags.bicycle_road === 'yes' || tags.cyclestreet === 'yes') return 'cycle_street';
+  const cw =
+    tags.cycleway ?? tags['cycleway:both'] ?? tags['cycleway:left'] ?? tags['cycleway:right'] ?? '';
+  if (/(lane|track|share_busway|opposite_lane|opposite_track)/.test(cw)) return 'cycle_lane';
   const map: Record<string, string> = {
-    cycleway: 'cycleway',
     path: 'path',
     footway: 'path',
+    pedestrian: 'path',
     living_street: 'living_street',
     residential: 'residential',
     tertiary: 'tertiary',
@@ -62,6 +68,72 @@ function clsFromTags(tags: Record<string, string>): string | null {
     service: 'residential',
   };
   return map[hw] ?? null;
+}
+
+// ---- OSM addresses (replaces the fragile municipal SIC Número/Vial join) ----
+
+export function overpassAddressQuery(b: Bbox): string {
+  return `[out:json][timeout:180];
+(
+  node["addr:housenumber"]["addr:street"](${b.south},${b.west},${b.north},${b.east});
+  way["addr:housenumber"]["addr:street"](${b.south},${b.west},${b.north},${b.east});
+);
+out center;`;
+}
+
+export async function fetchOsmAddresses(b: Bbox): Promise<unknown> {
+  const res = await fetch(OVERPASS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `data=${encodeURIComponent(overpassAddressQuery(b))}`,
+  });
+  if (!res.ok) throw new Error(`Overpass (addresses) returned ${res.status}`);
+  return res.json();
+}
+
+export interface OsmAddress {
+  display: string;
+  street: string;
+  number: string;
+  postcode: string;
+  lon: number;
+  lat: number;
+}
+
+interface OsmAddrEl {
+  type: string;
+  lat?: number;
+  lon?: number;
+  center?: { lat: number; lon: number };
+  tags?: Record<string, string>;
+}
+
+export function osmAddressesToRecords(osm: unknown): OsmAddress[] {
+  const elements = (osm as { elements?: OsmAddrEl[] }).elements ?? [];
+  const out: OsmAddress[] = [];
+  const seen = new Set<string>();
+  for (const el of elements) {
+    const tags = el.tags ?? {};
+    const street = tags['addr:street'];
+    const number = tags['addr:housenumber'];
+    if (!street || !number) continue;
+    const lat = el.lat ?? el.center?.lat;
+    const lon = el.lon ?? el.center?.lon;
+    if (lat == null || lon == null) continue;
+    const display = `${street} ${number}`;
+    const key = `${display}@${lon.toFixed(5)},${lat.toFixed(5)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      display,
+      street,
+      number,
+      postcode: tags['addr:postcode'] ?? '',
+      lon: round6(lon),
+      lat: round6(lat),
+    });
+  }
+  return out;
 }
 
 export function osmToGeoJson(osm: unknown): FeatureCollection {

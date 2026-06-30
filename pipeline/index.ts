@@ -1,6 +1,6 @@
 // Offline build orchestrator — `npm run build:data` (SPEC §6).
-// Stages: acquire (separate `fetch`) → build graph → build search → tiles →
-// manifest. Run locally by a maintainer; the resulting /data/* is committed.
+// Reads pipeline/raw (populated by `npm run fetch:data`) and writes /data.
+// Run automatically by CI on every deploy/preview; never by hand.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,94 +9,68 @@ import { buildAndWriteGraph } from './graph';
 import { buildAndWriteSearch, type AddressInput } from './search';
 import { buildTiles } from './tiles';
 import { writeManifest } from './manifest';
-import { osmToGeoJson } from './network';
+import { osmToGeoJson, osmAddressesToRecords } from './network';
 import { RAW_DIR, rawExists, readRawJson } from './util';
 
+// Authoritative municipal bike lanes, if present (best-effort fetch).
 function loadBikeLanes(): Feature[] {
+  if (!rawExists('carriles-bici.geojson')) return [];
   const fc = readRawJson<FeatureCollection>('carriles-bici.geojson');
-  return (fc.features ?? []).map((f) => ({
-    ...f,
-    properties: { ...(f.properties ?? {}), cls: (f.properties as { cls?: string })?.cls ?? 'cycleway' },
-  }));
+  return (fc.features ?? [])
+    .filter((f) => f.geometry?.type === 'LineString' || f.geometry?.type === 'MultiLineString')
+    .flatMap((f) => splitMulti(f))
+    .map((f) => ({
+      ...f,
+      properties: { ...(f.properties ?? {}), cls: 'cycleway' },
+    }));
 }
 
+// Normalize MultiLineString features into LineStrings (buildGraph wants lines).
+function splitMulti(f: Feature): Feature[] {
+  if (f.geometry?.type === 'MultiLineString') {
+    return f.geometry.coordinates.map((coords) => ({
+      type: 'Feature',
+      properties: f.properties,
+      geometry: { type: 'LineString', coordinates: coords },
+    }));
+  }
+  return [f];
+}
+
+// OSM highways → roads + cycleways (cycling-permission tags applied).
 function loadRoads(): Feature[] {
   if (!rawExists('osm-roads.json')) return [];
   const osm = JSON.parse(readFileSync(join(RAW_DIR, 'osm-roads.json'), 'utf8'));
   return osmToGeoJson(osm).features;
 }
 
-// --- Address index (Stage 4): join Número → Vial -----------------------------
-
-const TIPO_PREFIX: Record<string, string> = {
-  CL: 'Calle',
-  AV: 'Avenida',
-  PS: 'Paseo',
-  PZ: 'Plaza',
-  CR: 'Carretera',
-  CM: 'Camino',
-  GL: 'Glorieta',
-  TR: 'Travesía',
-};
-
-function parseCsv(text: string): Record<string, string>[] {
-  const delim = text.indexOf(';') >= 0 && text.indexOf(';') < text.indexOf('\n') ? ';' : ',';
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  const headers = lines[0].split(delim).map((h) => h.trim());
-  return lines.slice(1).map((ln) => {
-    const cells = ln.split(delim);
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => (row[h] = (cells[i] ?? '').trim()));
-    return row;
-  });
-}
-
+// OSM address points → search records.
 function buildAddresses(): AddressInput[] {
-  if (!rawExists('numero.geojson') || !rawExists('vial.csv')) return [];
-  const numero = readRawJson<FeatureCollection>('numero.geojson');
-  const vialRows = parseCsv(readFileSync(join(RAW_DIR, 'vial.csv'), 'utf8'));
-  const vialByCod = new Map<string, Record<string, string>>();
-  for (const row of vialRows) {
-    const cod = row.CODVIAL ?? row.codvial;
-    if (cod) vialByCod.set(cod, row);
-  }
-
-  const out: AddressInput[] = [];
-  let id = 0;
-  for (const f of numero.features ?? []) {
-    const props = (f.properties ?? {}) as Record<string, string>;
-    if (props.FECBAJA) continue; // dropped baja rows
-    const tip = props.TIPNUMERO;
-    if (tip && tip !== 'P' && tip !== 'A') continue;
-    if (!f.geometry || f.geometry.type !== 'Point') continue;
-    const cod = props.CODVIAL;
-    const vial = cod ? vialByCod.get(cod) : undefined;
-    const nomvial = vial?.NOMVIAL ?? props.NOMVIAL ?? '';
-    if (!nomvial) continue;
-    const prefix = TIPO_PREFIX[vial?.CODTIPVIAL ?? props.CODTIPVIAL ?? ''] ?? '';
-    const street = `${prefix} ${nomvial}`.trim();
-    const number = props.NUMERO ?? props.NUM ?? '';
-    const [lon, lat] = (f.geometry.coordinates as [number, number]) ?? [0, 0];
-    out.push({
-      id: id++,
-      display: `${street} ${number}`.trim(),
-      street,
-      number,
-      postcode: props.COD_POSTAL ?? props.CP ?? '',
-      lon,
-      lat,
-    });
-  }
-  return out;
+  if (!rawExists('osm-addresses.json')) return [];
+  const osm = JSON.parse(readFileSync(join(RAW_DIR, 'osm-addresses.json'), 'utf8'));
+  return osmAddressesToRecords(osm).map((a, i) => ({
+    id: i,
+    display: a.display,
+    street: a.street,
+    number: a.number,
+    postcode: a.postcode,
+    lon: a.lon,
+    lat: a.lat,
+  }));
 }
 
 async function main(): Promise<void> {
-  if (!rawExists('carriles-bici.geojson')) {
+  if (!rawExists('osm-roads.json')) {
     console.error('No raw data found. Run `npm run fetch:data` first (needs network access).');
     process.exit(1);
   }
+
   console.log('Stage 2/3 — building routing graph…');
-  const features = [...loadBikeLanes(), ...loadRoads()];
+  const bike = loadBikeLanes();
+  const roads = loadRoads();
+  console.log(`  ${bike.length} municipal bike features + ${roads.length} OSM highway features`);
+  const features = [...bike, ...roads];
+  if (features.length === 0) throw new Error('No input features — cannot build a graph.');
   const graph = buildAndWriteGraph({ type: 'FeatureCollection', features }, { tolerance_m: 12 });
   console.log(`  ${graph.nodes} nodes, ${graph.edges} edges, ${graph.components} component(s)`);
   for (const w of graph.warnings) console.log(`  ⚠ ${w}`);

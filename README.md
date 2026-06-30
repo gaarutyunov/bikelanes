@@ -43,8 +43,12 @@ re-runnable pipeline (`/pipeline`). They are **built by CI and published into
 `dist/`, never committed and never hand-authored** — there is no synthetic
 sample dataset.
 
-- `npm run fetch:data` — download the municipal portal + OSM/Overpass sources
-  into `pipeline/raw/` (cached; skips files already present).
+- `npm run fetch:data` — download sources into `pipeline/raw/` (cached; skips
+  files already present). **Primary source is OpenStreetMap via Overpass** — one
+  reliable, programmatic API with Málaga's cycleways, roads *and* addresses. The
+  municipal `carril-bici` layer is fetched as a best-effort authoritative
+  augmentation; if the portal URL is unavailable the build proceeds with OSM
+  cycleways alone (not a runtime fallback — see SPEC §3).
 - `npm run build:data` — build `/data/*` from the raw sources. Spatial-index
   noding/snapping keeps this fast even at city scale. Optional
   GDAL/tippecanoe/Planetiler enable reprojection and PMTiles; without them the

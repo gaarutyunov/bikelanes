@@ -116,8 +116,10 @@ Deterministic, re-runnable, version-pinned. Output = the static artifacts in §8
 
 **Stage 4 — Build the address index.**
 
-1. Join `Número` → `Vial` on `CODVIAL`; attach `NOMVIAL`; expand `CODTIPVIAL` to a type prefix (“Calle”, “Avenida”, …); compose `display` (“Calle Larios 5”).
-1. Filter `TIPNUMERO` ∈ {P, A}; drop rows with non-empty `FECBAJA`.
+> **Source note (impl):** addresses are taken from **OSM `addr:housenumber` + `addr:street`** nodes/ways via Overpass, which is one reliable programmatic source (the municipal SIC `Número`/`Vial` deep download URLs proved unstable for an automated CI build). The municipal-join steps below remain the spec-ideal alternative if those URLs are wired up; the rest of the stage (FlexSearch export, `coords.bin`) is identical.
+
+1. (Municipal alt.) Join `Número` → `Vial` on `CODVIAL`; attach `NOMVIAL`; expand `CODTIPVIAL` to a type prefix (“Calle”, “Avenida”, …); compose `display` (“Calle Larios 5”). _(OSM path: `display` = `addr:street` + `addr:housenumber`.)_
+1. (Municipal alt.) Filter `TIPNUMERO` ∈ {P, A}; drop rows with non-empty `FECBAJA`.
 1. Build a **FlexSearch Document index** over `{id, display, street, number, postcode}`; **export** it to static files (`/data/search/index.*`).
 1. Emit `coords.bin`: a packed array indexed by `id` → `[lon, lat]` (Float32, §9.3).
 1. Emit `search/meta.json` (record count, field schema, attribution).
