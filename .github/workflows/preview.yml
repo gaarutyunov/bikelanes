@@ -8,6 +8,8 @@ permissions:
 concurrency:
   group: preview-${{ github.event.number }}
   cancel-in-progress: true
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' # previews don't run the browser smoke test
 jobs:
   preview:
     runs-on: ubuntu-latest

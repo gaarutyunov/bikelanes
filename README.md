@@ -86,6 +86,14 @@ GitHub Pages in **branch mode** (`gh-pages`), driven by GitHub Actions:
 Vite `base: './'` keeps all asset/data URLs relative so the same bundle works at
 the production path and at every preview subpath. See `SPEC.md` §17.
 
+### Smoke test (CI gate)
+
+`npm run smoke` builds nothing itself but loads the already-built `dist/` in
+headless Chromium (via Playwright), failing on console errors, failed requests,
+or a map that never renders. `ci.yml` runs it on every push/PR, and `deploy.yml`
+runs it before publishing, so a broken build (e.g. an invalid map style) can't
+reach production. Locally: `npm run build:app && npm run smoke`.
+
 ## Architecture
 
 ```
