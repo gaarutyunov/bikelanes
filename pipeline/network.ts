@@ -10,7 +10,48 @@ export interface Bbox {
   east: number;
 }
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+// Mirrors tried in order. overpass-api.de now returns HTTP 406 for requests
+// without a descriptive User-Agent, so we always send one (and a sane Accept).
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+const OVERPASS_UA = 'BikeNavMalaga/1.0 (+https://github.com/gaarutyunov/bikelanes)';
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** POST an Overpass QL query, trying mirrors and retrying transient failures. */
+export async function overpassFetch(query: string): Promise<unknown> {
+  let lastErr: unknown = new Error('Overpass: no endpoints tried');
+  for (const url of OVERPASS_ENDPOINTS) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': OVERPASS_UA,
+            Accept: 'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+          },
+          body: `data=${encodeURIComponent(query)}`,
+        });
+        if (res.status === 429 || res.status === 504 || res.status === 503) {
+          lastErr = new Error(`Overpass ${res.status} (busy)`);
+          await sleep(2000 * (attempt + 1));
+          continue;
+        }
+        if (!res.ok) throw new Error(`Overpass returned ${res.status} from ${url}`);
+        return await res.json();
+      } catch (err) {
+        lastErr = err;
+        await sleep(1000 * (attempt + 1));
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
 
 /** Query OSM ways (highways + cycleways) for cycling-permission tags. */
 export function overpassQuery(b: Bbox): string {
@@ -22,13 +63,7 @@ out body geom;`;
 }
 
 export async function fetchOsmRoads(b: Bbox): Promise<unknown> {
-  const res = await fetch(OVERPASS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(overpassQuery(b))}`,
-  });
-  if (!res.ok) throw new Error(`Overpass returned ${res.status}`);
-  return res.json();
+  return overpassFetch(overpassQuery(b));
 }
 
 interface OsmWay {
@@ -82,13 +117,7 @@ out center;`;
 }
 
 export async function fetchOsmAddresses(b: Bbox): Promise<unknown> {
-  const res = await fetch(OVERPASS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(overpassAddressQuery(b))}`,
-  });
-  if (!res.ok) throw new Error(`Overpass (addresses) returned ${res.status}`);
-  return res.json();
+  return overpassFetch(overpassAddressQuery(b));
 }
 
 export interface OsmAddress {
