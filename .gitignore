@@ -1,0 +1,8 @@
+node_modules/
+dist/
+pipeline/raw/
+*.local
+.DS_Store
+.vite/
+npm-debug.log*
+/data/

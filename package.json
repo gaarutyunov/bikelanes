@@ -1,0 +1,36 @@
+{
+  "name": "bikenav-malaga",
+  "version": "1.2.0",
+  "description": "Browser-only, client-side bike-lane navigation for Málaga (GitHub Pages).",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:app": "tsc --noEmit && vite build",
+    "build": "npm run build:app",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "fetch:data": "tsx pipeline/fetch.ts",
+    "build:data": "tsx pipeline/index.ts",
+    "deploy": "npm run build:app"
+  },
+  "dependencies": {
+    "flatbush": "^4.4.0",
+    "flexsearch": "^0.7.43",
+    "idb": "^8.0.0",
+    "maplibre-gl": "^4.7.1",
+    "ngraph.graph": "^20.0.1",
+    "ngraph.path": "^1.5.0",
+    "pmtiles": "^3.2.1"
+  },
+  "devDependencies": {
+    "@turf/turf": "^7.1.0",
+    "@types/geojson": "^7946.0.14",
+    "@types/node": "^22.20.0",
+    "playwright": "^1.49.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

@@ -1,0 +1,48 @@
+name: PR Preview
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+permissions:
+  contents: write          # push preview to gh-pages
+  pull-requests: write     # post the preview-URL comment
+concurrency:
+  group: preview-${{ github.event.number }}
+  cancel-in-progress: true
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' # previews don't run the browser smoke test
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: github.event.action != 'closed'
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+        if: github.event.action != 'closed'
+
+      # Build real data (cached weekly) so previews are faithful. (SPEC §17.2)
+      - id: stamp
+        if: github.event.action != 'closed'
+        run: echo "week=$(date +%Y-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        if: github.event.action != 'closed'
+        with:
+          path: pipeline/raw
+          key: malaga-raw-${{ steps.stamp.outputs.week }}
+      - run: npm run fetch:data
+        if: github.event.action != 'closed'
+      - run: npm run build:data
+        if: github.event.action != 'closed'
+
+      - run: npm run build:app
+        if: github.event.action != 'closed'
+      - name: Deploy / remove preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: ./dist
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          action: auto       # deploy on open/sync, remove on close

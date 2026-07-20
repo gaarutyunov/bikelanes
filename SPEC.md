@@ -116,8 +116,10 @@ Deterministic, re-runnable, version-pinned. Output = the static artifacts in §8
 
 **Stage 4 — Build the address index.**
 
-1. Join `Número` → `Vial` on `CODVIAL`; attach `NOMVIAL`; expand `CODTIPVIAL` to a type prefix (“Calle”, “Avenida”, …); compose `display` (“Calle Larios 5”).
-1. Filter `TIPNUMERO` ∈ {P, A}; drop rows with non-empty `FECBAJA`.
+> **Source note (impl):** addresses are taken from **OSM `addr:housenumber` + `addr:street`** nodes/ways via Overpass, which is one reliable programmatic source (the municipal SIC `Número`/`Vial` deep download URLs proved unstable for an automated CI build). The municipal-join steps below remain the spec-ideal alternative if those URLs are wired up; the rest of the stage (FlexSearch export, `coords.bin`) is identical.
+
+1. (Municipal alt.) Join `Número` → `Vial` on `CODVIAL`; attach `NOMVIAL`; expand `CODTIPVIAL` to a type prefix (“Calle”, “Avenida”, …); compose `display` (“Calle Larios 5”). _(OSM path: `display` = `addr:street` + `addr:housenumber`.)_
+1. (Municipal alt.) Filter `TIPNUMERO` ∈ {P, A}; drop rows with non-empty `FECBAJA`.
 1. Build a **FlexSearch Document index** over `{id, display, street, number, postcode}`; **export** it to static files (`/data/search/index.*`).
 1. Emit `coords.bin`: a packed array indexed by `id` → `[lon, lat]` (Float32, §9.3).
 1. Emit `search/meta.json` (record count, field schema, attribution).
@@ -438,18 +440,18 @@ No framework mandated; vanilla TS + Vite is sufficient. Vite `base` set to the P
     /nav                  # journey session controller, speed/progress, ETA
     /history              # IndexedDB (idb) stores, export/import
     /workers/{search,routing,import}.worker.ts
-  /data/...               # §8 artifacts (committed, prebuilt — served as-is, never in Git LFS)
+  /data/...               # §8 artifacts (gitignored; built by CI each deploy, published in dist/)
   /pipeline               # offline build scripts (Node)
     fetch.ts  network.ts  graph.ts  search.ts  tiles.ts  manifest.ts
   /pipeline/raw           # downloaded source data (gitignored)
   /.github/workflows/
-    deploy.yml            # build app + publish dist/ to gh-pages root on push to main
-    preview.yml           # PR preview deploy + cleanup (§17.3)
+    deploy.yml            # fetch + build data + build app, publish dist/ to gh-pages on push to main
+    preview.yml           # PR preview: fetch + build data + build app, deploy + cleanup (§17.3)
   package.json            # scripts: build:data, build:app, dev, deploy
   dist/                   # build:app output (gitignored); what CI publishes to gh-pages
 ```
 
-`npm run build:data` → regenerates `/data/*` (run **locally** by a maintainer; artifacts are committed, see §17.2). `npm run build:app` → bundles the site into `dist/`. Deployment is automated via GitHub Actions (§17).
+`npm run fetch:data` then `npm run build:data` → regenerate `/data/*` from the real sources (run automatically by CI on every deploy/preview; see §17.2 — `/data` is gitignored, never hand-authored). `npm run build:app` → bundles the site into `dist/` (and copies `/data` into `dist/data`). Deployment is automated via GitHub Actions (§17).
 
 -----
 
@@ -465,8 +467,10 @@ The site is published to **GitHub Pages in branch mode** and built/deployed enti
 
 ### 17.2 What CI builds (and does not)
 
-- CI runs **`build:app` only** (Vite bundle). The heavy `build:data` pipeline (GDAL, tippecanoe, Overpass) is run **locally by a maintainer**, and the resulting `/data/*` artifacts are **committed to the repo**. This keeps CI fast, deterministic, and free of build-time network calls — consistent with the prebuilt-index philosophy.
-- Regenerating data is therefore a deliberate maintainer action (PR that updates `/data/*`), not something CI does on every push.
+- **CI builds the data, never a human.** Both `deploy.yml` and `preview.yml` run the full pipeline — `fetch:data` (municipal portal + OSM/Overpass) then `build:data` — before `build:app`. GitHub's runners have the outbound network access the build needs; a local sandbox may not. The artifacts are produced fresh in CI and published as part of `dist/`; they are **not committed to the repo** (so no clone bloat — this resolves open question §20.11) and are **never hand-authored**.
+- Raw sources are cached weekly (`actions/cache` on `pipeline/raw`, keyed by ISO week); `fetch:data` skips files already present, so most runs reuse the cache and only the first run per week re-downloads. `build:data` is fast (spatial-index noding/snapping), so building on each deploy/preview is cheap.
+- Optional GDAL (reprojection) / tippecanoe / Planetiler (tiles) are not required: sources are already EPSG:4326 and, without tile tools, the pipeline ships the `bikelanes.geojson` display layer. Add the apt/Java steps to the workflow to enable PMTiles.
+- There is **no `build:data` in CI gated behind a manual dispatch and no committed sample dataset** — the previous “committed artifacts, app-only CI” split is replaced by “CI builds real data every deploy.”
 
 ### 17.3 Workflows
 
@@ -543,9 +547,9 @@ On open/update this publishes `dist/` to `gh-pages:/pr-preview/pr-<N>/` and comm
 
 Because previews are served from a deep subpath (`/<repo>/pr-preview/pr-<N>/`), all asset and data URLs **must be relative**. Set Vite `base: './'` and fetch artifacts as `./data/...` (not `/data/...`). This single setting makes the same `dist/` bundle work at the production path and at every preview subpath without per-build rewriting.
 
-### 17.5 Large artifacts & Git LFS caveat
+### 17.5 Large artifacts & Pages limits
 
-`/data/*` (notably `basemap.pmtiles`, up to 100 MiB) are committed as **regular Git files**, never Git LFS: **GitHub Pages does not serve Git-LFS objects**, so an LFS-tracked artifact would 404 at runtime. Keep each artifact under the 100 MiB hard file limit and the site under the 1 GB Pages limit; if the basemap approaches the limit, shrink the extract bbox (§19.6) rather than reaching for LFS.
+`/data/*` (notably `basemap.pmtiles`, up to 100 MiB) are **built by CI and published into `dist/` on `gh-pages`** — they are not stored in Git at all (so neither repo bloat nor the Git-LFS-404 problem applies; **GitHub Pages does not serve Git-LFS objects**, so an artifact must never be LFS-tracked). Keep each published artifact under the 100 MiB hard file limit and the site under the 1 GB Pages limit; if the basemap approaches the limit, shrink the extract bbox (§19.6).
 
 ### 17.6 Acceptance
 

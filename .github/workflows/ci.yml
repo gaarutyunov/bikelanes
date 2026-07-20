@@ -1,0 +1,53 @@
+name: CI
+
+# Quality gate: type-check, build the real data + app, then load the built site
+# in headless Chromium and fail on console errors or a map that never renders.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' # no browser download during npm ci
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      # Real data (weekly-cached raw sources) — the smoke test needs /data to
+      # reach "Ready".
+      - id: stamp
+        run: echo "week=$(date +%Y-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: pipeline/raw
+          key: malaga-raw-${{ steps.stamp.outputs.week }}
+      - run: npm run fetch:data
+      - run: npm run build:data
+      - run: npm run build:app
+
+      # Cache + install the Playwright browser, then smoke-test the built site.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '' # the install CLI must download
+      - run: npm run smoke
