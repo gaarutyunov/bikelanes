@@ -59,7 +59,7 @@ export async function fetchAll(): Promise<void> {
       } catch {
         /* CKAN lookup failed — use the fallback path */
       }
-      const res = await fetch(url, { headers: { 'User-Agent': 'BikeNavMalaga/1.0' } });
+      const res = await fetch(url, { headers: { 'User-Agent': 'Bikelanes/1.0' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       save('carriles-bici.geojson', Buffer.from(await res.arrayBuffer()));
       console.log(`  ↓ carriles-bici.geojson (municipal)`);

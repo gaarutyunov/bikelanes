@@ -1,4 +1,4 @@
-# BikeNav Málaga
+# Bikelanes
 
 A browser-only, client-side bike-lane navigation web app for Málaga, hosted on
 GitHub Pages. All map, routing and search data is **prebuilt offline** and

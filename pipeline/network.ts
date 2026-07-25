@@ -17,7 +17,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
 ];
-const OVERPASS_UA = 'BikeNavMalaga/1.0 (+https://github.com/gaarutyunov/bikelanes)';
+const OVERPASS_UA = 'Bikelanes/1.0 (+https://github.com/gaarutyunov/bikelanes)';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
