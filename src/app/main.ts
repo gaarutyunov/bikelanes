@@ -1,4 +1,4 @@
-// BikeNav Málaga — app entry point. Wires map, workers, search, slider, import,
+// Bikelanes — app entry point. Wires map, workers, search, slider, import,
 // route panel, navigation HUD and history panel together. (SPEC §4, §10)
 
 import { lineSliceAlong } from '@turf/turf';

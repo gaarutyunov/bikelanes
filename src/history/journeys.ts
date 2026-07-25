@@ -83,7 +83,7 @@ export async function exportHistory(): Promise<HistoryExport> {
 export async function importHistory(data: unknown, replace = true): Promise<number> {
   const parsed = data as Partial<HistoryExport>;
   if (!parsed || parsed.format !== 'bikenav-history' || !Array.isArray(parsed.journeys)) {
-    throw new Error('Not a BikeNav history export file.');
+    throw new Error('Not a Bikelanes history export file.');
   }
   const d = await db();
   const tx = d.transaction(['journeys', 'speedProfile'], 'readwrite');

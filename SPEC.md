@@ -1,4 +1,4 @@
-# BikeNav Málaga — Technical Specification v1.2
+# Bikelanes — Technical Specification v1.2
 
 A browser-only, client-side bike-lane navigation web app for Málaga, hosted on GitHub Pages. All Málaga data (basemap, routing graph, address search) is **pre-built offline and shipped as static artifacts**. There are **no runtime network or API dependencies** — no Google, no Photon, no Nominatim, no CartoCiudad REST, no Overpass at runtime.
 
