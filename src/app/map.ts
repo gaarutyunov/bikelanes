@@ -2,6 +2,13 @@
 // route + progress overlays, and markers (SPEC §10).
 
 import maplibregl, { type StyleSpecification, type LngLatLike } from 'maplibre-gl';
+// MapLibre ships its DOM chrome unstyled: without this stylesheet
+// `.maplibregl-canvas-container`, `.maplibregl-marker` and the control
+// containers stay `position: static`, so every Marker (start, destination,
+// live position) and every control (zoom, attribution) is laid out *after*
+// the full-height canvas in normal flow — i.e. off-screen. The library does
+// not inject it, so it must be imported explicitly.
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
 import type { Feature, FeatureCollection, LineString } from 'geojson';
 import type { Manifest } from '../core/types';
@@ -15,6 +22,9 @@ const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 const BIKE_COLOR = '#9b1c3d';
 const ROAD_COLOR = '#1462d6';
 const CONNECTOR_COLOR = '#c98a00';
+// Casing drawn under the route line so it reads as a distinct ribbon on top of
+// the (identically coloured) lane/road network.
+const CASING_COLOR = '#ffffff';
 
 export class BikeMap {
   map: maplibregl.Map;
@@ -117,6 +127,16 @@ export class BikeMap {
   private addOverlays(): void {
     this.map.addSource('route', { type: 'geojson', data: EMPTY_FC });
     this.map.addSource('progress', { type: 'geojson', data: EMPTY_FC });
+    // Casing under the route. The route is coloured by surface with the *same*
+    // two colours as the bike-lane/road display layer it is drawn over, so
+    // without a casing it is indistinguishable from the network beneath it.
+    this.map.addLayer({
+      id: 'route-casing',
+      type: 'line',
+      source: 'route',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': CASING_COLOR, 'line-width': 11, 'line-opacity': 0.95 },
+    });
     this.map.addLayer({
       id: 'route',
       type: 'line',
