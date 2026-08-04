@@ -303,6 +303,8 @@ const CLASS_LABEL: Record<EdgeClass, string> = {
   primary: 'main road',
   link: 'ramp',
   connector: 'connecting street',
+  footway: 'pavement',
+  shared_lane: 'shared lane (bikes marked, traffic alongside)',
 };
 
 function stepText(cls: EdgeClass, dist: number): string {

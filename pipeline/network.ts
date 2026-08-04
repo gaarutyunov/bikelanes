@@ -72,6 +72,25 @@ interface OsmWay {
   tags?: Record<string, string>;
 }
 
+// Where the cycleway=* family is tagged on a road way, and which of its values
+// mean a lane the rider actually gets to themselves.
+//
+// A sharrow (`shared_lane` / `pictogram` — a bike pictogram painted inside a
+// shared traffic lane) is not one, and gets its own class. It is not academic:
+// Málaga has 43.1 km of sharrow against 0.8 km of real on-road lane, and every
+// one of its 343 sharrow ways is on a `primary` or `secondary` road. Reading
+// them as cycle lanes painted the main carriageways of Paseo Marítimo and
+// Avenida Manuel Agustín Heredia onto the map as bike lanes and told the router
+// they were as comfortable as a segregated track.
+const CYCLEWAY_SIDE_KEYS = ['cycleway', 'cycleway:both', 'cycleway:left', 'cycleway:right'];
+const DEDICATED_LANE =
+  /^(lane|track|opposite_lane|opposite_track|share_busway|opposite_share_busway)$/;
+const SHARROW = /^(shared_lane|pictogram)$/;
+
+// Ways that exist for people on foot. A bike may be pushed along them and they
+// are needed for connectivity, but they are not cycling infrastructure.
+const FOOT_HIGHWAYS = new Set(['footway', 'pedestrian', 'path']);
+
 // Map an OSM highway tag to an internal edge class (SPEC §7.2). Excluded
 // highways are tagged so buildGraph drops them.
 function clsFromTags(tags: Record<string, string>): string | null {
@@ -82,13 +101,17 @@ function clsFromTags(tags: Record<string, string>): string | null {
   if (hw === 'cycleway') return 'cycleway';
   // Bike-priority streets and on-road cycle lanes tagged on a road way.
   if (tags.bicycle_road === 'yes' || tags.cyclestreet === 'yes') return 'cycle_street';
-  const cw =
-    tags.cycleway ?? tags['cycleway:both'] ?? tags['cycleway:left'] ?? tags['cycleway:right'] ?? '';
-  if (/(lane|track|share_busway|opposite_lane|opposite_track)/.test(cw)) return 'cycle_lane';
+  if (CYCLEWAY_SIDE_KEYS.some((k) => DEDICATED_LANE.test(tags[k] ?? ''))) return 'cycle_lane';
+  if (CYCLEWAY_SIDE_KEYS.some((k) => SHARROW.test(tags[k] ?? ''))) return 'shared_lane';
+  if (FOOT_HIGHWAYS.has(hw)) {
+    // A segregated cycle track is very often mapped as highway=path/footway
+    // carrying bicycle=designated, so that has to be recognised here rather
+    // than lumped in with the pavements.
+    if (tags.bicycle === 'designated') return 'cycleway';
+    if (tags.bicycle === 'yes' || tags.bicycle === 'permissive') return 'path';
+    return 'footway';
+  }
   const map: Record<string, string> = {
-    path: 'path',
-    footway: 'path',
-    pedestrian: 'path',
     living_street: 'living_street',
     residential: 'residential',
     tertiary: 'tertiary',

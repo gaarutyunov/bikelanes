@@ -32,6 +32,9 @@ jobs:
       - run: npm run fetch:data
       - run: npm run build:data
 
+      # Route-gate: never publish a build whose routes ignore the lane network.
+      - run: npm run check:routing
+
       - run: npm run build:app
 
       # Smoke-gate: never publish a build whose map fails to render.

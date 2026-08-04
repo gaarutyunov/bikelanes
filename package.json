@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
+    "check:routing": "tsx scripts/route-check.ts",
     "fetch:data": "tsx pipeline/fetch.ts",
     "build:data": "tsx pipeline/index.ts",
     "deploy": "npm run build:app"

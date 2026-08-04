@@ -302,7 +302,9 @@ class App {
       const text = await file.text();
       const geojson = JSON.parse(text);
       const merge = $<HTMLInputElement>('import-merge').checked;
-      const out = await processImport(geojson, 12, 'path');
+      // An imported network is the rider's own bike routes, so untyped features
+      // default to `cycleway` — `path` no longer counts as bike infrastructure.
+      const out = await processImport(geojson, 12, 'cycleway');
       if (out.type === 'error') {
         this.setStatus(out.error, 'error');
         return;

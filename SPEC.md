@@ -156,7 +156,7 @@ Speeds here are **cold-start priors**, used for ETA until personal history is av
 |`cycleway`     |Segregated cycle track            |18                |
 |`cycle_lane`   |On-road painted lane              |16                |
 |`cycle_street` |Bike-priority street              |16                |
-|`path`         |Shared path (bikes allowed)       |13                |
+|`path`         |Shared path (bikes explicitly allowed)|13            |
 |`living_street`|Calmed street                     |14                |
 |`residential`  |Residential road                  |15                |
 |`tertiary`     |Minor through-road                |16                |
@@ -164,26 +164,56 @@ Speeds here are **cold-start priors**, used for ETA until personal history is av
 |`primary`      |Major road (bikes allowed)        |16                |
 |`link`         |On/off ramps (bikes allowed)      |14                |
 |`connector`    |Synthetic snap link between layers|10                |
+|`footway`      |Pavement / pedestrian street      |10                |
+|`shared_lane`  |Sharrow — bikes marked in a traffic lane|16          |
 
 Excluded at build time (never in the graph): `motorway`, `motorway_link`, anything `bicycle=no`/`access=no`.
+
+**Only `cycleway`, `cycle_lane` and `cycle_street` count as bike infrastructure**
+(`isBike`) — that predicate drives the map's lane colour, the route's
+bike-vs-road colouring and the reported road share, so it has to mean what a
+rider means by "a bike lane". Classification rules that follow from that:
+
+- `highway=footway|pedestrian|path` is `footway` unless it carries
+  `bicycle=yes|permissive` (→ `path`) or `bicycle=designated` (→ `cycleway`,
+  the usual mapping for a segregated track). Málaga's extract holds ~16.5k such
+  ways against ~1.5k cycleways, so lumping them in with bike infrastructure
+  swamps the real network.
+- `cycleway*=shared_lane` / `pictogram` is a sharrow, not a lane, and becomes
+  `shared_lane`: preferred over the bare road it is painted on, but not bike
+  infrastructure. Only `lane`, `track`, `opposite_lane`, `opposite_track` and
+  `share_busway` yield `cycle_lane`. Málaga has 43.1 km of sharrow against
+  0.8 km of real on-road lane, and all 343 of its sharrow ways are on `primary`
+  or `secondary` roads — reading them as lanes put main carriageways on the map
+  as bike lanes.
 
 ### 7.3 Preference model (the slider)
 
 Single control `p ∈ [0,1]` (UI: “Prefer bike lanes” 0 ↔ “Fastest” 1). A per-class **comfort penalty** multiplies time to form the **routing cost** (path selection only — not the ETA):
 
 ```
-isBike(cls)  = cls ∈ {cycleway, cycle_lane, cycle_street, path}
-penaltyMax   = 4.0                       // tunable
-roadPenalty  = 1 + (1 - p) * (penaltyMax - 1)
-penalty(cls) = isBike(cls) ? 1.0
-             : cls === 'connector' ? (1 + (1 - p) * 2.0)
-             : roadPenalty
+penaltyMax   = 6.0                       // tunable
+penalty(cls) = 1 + (1 - p) * (penaltyMax - 1) * comfort(cls)
 routingCost(edge) = (edge.len / priorSpeed(edge.cls)) * penalty(edge.cls)
 ```
 
-- `p = 0`: roads cost ~4× → routes hug bike lanes, using roads only to bridge gaps.
+`comfort(cls)` is a per-class discomfort on 0 = ideal … 1 = a main road, with
+values above 1 for surfaces to avoid outright:
+
+|`cls`    |cycleway|cycle_street|cycle_lane|connector|living_street|residential|path|shared_lane|tertiary|link|secondary|primary|footway|
+|---------|--------|------------|----------|---------|-------------|-----------|----|-----------|--------|----|---------|-------|-------|
+|`comfort`|0       |0.10        |0.15      |0.40     |0.40         |0.55       |0.60|0.60       |0.70    |0.85|0.90     |1.00   |1.30   |
+
+- `p = 0`: a main road costs 6× a cycle track and a pavement ~7.8× → routes hug
+  the lane network, using roads only to bridge gaps.
 - `p = 1`: penalties collapse to 1 → fastest-time routing regardless of surface.
 - Default `p = 0.35`.
+
+A graded scale rather than the original binary bike/road split, because the
+binary version made a pavement exactly as attractive as a segregated track and a
+four-lane primary exactly as attractive as a quiet residential street — the
+cause of routes that ignored the lane network (#5). The `connector` weight is
+set so its penalty is unchanged from the binary model.
 
 The penalty is applied **live** inside `ngraph.path`’s distance function, so moving the slider re-routes without rebuilding the graph. **The comfort penalty never affects the displayed ETA** — see §14.
 
@@ -604,7 +634,7 @@ Breaching a load ceiling triggers the build-time degradation switches (street-le
 ## 20. Open questions (to resolve before/at M2–M8)
 
 1. **Snap tolerance** (default 12 m) — validate against real lane/road geometry; expose as a build parameter.
-1. **`penaltyMax`** (default 4) and per-class priors — tune empirically on sample routes.
+1. **`penaltyMax`** (default 6) and the `comfort(cls)` weights — tuned empirically on 23 sampled 1.2–3.5 km routes (§7.3); revisit as the lane network grows.
 1. **Número record count & file size** — confirm by downloading and counting; decides whether full portal-level search fits the budget or M5 uses the street-level switch.
 1. **One-way handling for cycle infra** — confirm municipal/OSM oneway tagging quality for bidirectional cycle tracks.
 1. **Connector-edge penalty** — tune so the router bridges layers willingly but doesn’t zig-zag between lane and road.
