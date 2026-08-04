@@ -45,6 +45,29 @@ try {
   });
   if (!mapSized) errors.push('map canvas has zero size');
 
+  // MapLibre's own stylesheet must be loaded. Without it every Marker (start,
+  // destination, live position) and every control is `position: static` and so
+  // is laid out *after* the full-height canvas — i.e. off-screen (issue #5).
+  const chrome = await page.evaluate(() => {
+    const ctrl = document.querySelector('.maplibregl-ctrl-top-right');
+    const markerRule = [...document.styleSheets].some((s) => {
+      try {
+        return [...s.cssRules].some((r) => r.selectorText?.includes('.maplibregl-marker'));
+      } catch {
+        return false; // cross-origin sheet
+      }
+    });
+    return {
+      ctrlPosition: ctrl ? getComputedStyle(ctrl).position : null,
+      ctrlInViewport: ctrl ? ctrl.getBoundingClientRect().bottom <= window.innerHeight + 1 : false,
+      markerRule,
+    };
+  });
+  if (!chrome.markerRule) errors.push('maplibre-gl.css is not loaded (no .maplibregl-marker rule)');
+  if (chrome.ctrlPosition !== 'absolute')
+    errors.push(`map controls are not positioned (position: ${chrome.ctrlPosition})`);
+  if (!chrome.ctrlInViewport) errors.push('map controls render outside the viewport');
+
   const status = (await page.locator('#status').textContent().catch(() => '')) ?? '';
   await browser.close();
 

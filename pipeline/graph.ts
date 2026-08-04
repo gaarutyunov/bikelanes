@@ -29,10 +29,20 @@ function bboxOf(nodes: GraphNode[]): [number, number, number, number] {
   return [minLon, minLat, maxLon, maxLat];
 }
 
+// Display kind drives the map's colour ramp (§10). Pavements get their own kind
+// so the lane network reads at a glance: they outnumber real cycleways ~10:1 by
+// length, and drawing them like roads (never mind like lanes) buries it.
+function displayKind(cls: ReturnType<typeof classFromId>): string {
+  if (cls === 'connector') return 'connector';
+  if (cls === 'footway') return 'foot';
+  if (cls === 'shared_lane') return 'shared';
+  return isBike(cls) ? 'bike' : 'road';
+}
+
 function displayLayer(nodes: GraphNode[], edges: GraphEdge[]): FeatureCollection {
   const features: Feature[] = edges.map((e) => {
     const cls = classFromId(e.cls);
-    const kind = cls === 'connector' ? 'connector' : isBike(cls) ? 'bike' : 'road';
+    const kind = displayKind(cls);
     return {
       type: 'Feature',
       properties: { cls, kind },

@@ -94,6 +94,14 @@ or a map that never renders. `ci.yml` runs it on every push/PR, and `deploy.yml`
 runs it before publishing, so a broken build (e.g. an invalid map style) can't
 reach production. Locally: `npm run build:app && npm run smoke`.
 
+### Routing check (CI gate)
+
+`npm run check:routing` runs the production router over the freshly built
+`data/graph.bin` for a fixed set of Málaga corridors and fails if the routes stop
+following the bike network — the app's whole point, and something a
+route-that-merely-exists doesn't prove. Both `ci.yml` and `deploy.yml` run it
+after `build:data`. Locally: `npm run build:data && npm run check:routing`.
+
 ## Architecture
 
 ```

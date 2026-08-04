@@ -40,6 +40,10 @@ jobs:
           key: malaga-raw-${{ steps.stamp.outputs.week }}
       - run: npm run fetch:data
       - run: npm run build:data
+
+      # Routes must actually follow the bike network, not just exist (#5).
+      - run: npm run check:routing
+
       - run: npm run build:app
 
       # Cache + install the Playwright browser, then smoke-test the built site.

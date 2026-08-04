@@ -2,6 +2,13 @@
 // route + progress overlays, and markers (SPEC §10).
 
 import maplibregl, { type StyleSpecification, type LngLatLike } from 'maplibre-gl';
+// MapLibre ships its DOM chrome unstyled: without this stylesheet
+// `.maplibregl-canvas-container`, `.maplibregl-marker` and the control
+// containers stay `position: static`, so every Marker (start, destination,
+// live position) and every control (zoom, attribution) is laid out *after*
+// the full-height canvas in normal flow — i.e. off-screen. The library does
+// not inject it, so it must be imported explicitly.
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { Protocol } from 'pmtiles';
 import type { Feature, FeatureCollection, LineString } from 'geojson';
 import type { Manifest } from '../core/types';
@@ -15,6 +22,16 @@ const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 const BIKE_COLOR = '#9b1c3d';
 const ROAD_COLOR = '#1462d6';
 const CONNECTOR_COLOR = '#c98a00';
+// Pavements and pedestrian streets. Routable, but not bike infrastructure and
+// ten times the length of the real lane network — drawn as faint context so the
+// lanes stay legible (SPEC §10).
+const FOOT_COLOR = '#9aa5b1';
+// Sharrows: a marked bike route sharing a traffic lane. Preferred over a bare
+// road but not a lane, so it reads as a washed-out version of the lane colour.
+const SHARED_COLOR = '#c98aa0';
+// Casing drawn under the route line so it reads as a distinct ribbon on top of
+// the (identically coloured) lane/road network.
+const CASING_COLOR = '#ffffff';
 
 export class BikeMap {
   map: maplibregl.Map;
@@ -95,19 +112,27 @@ export class BikeMap {
         id: 'bikelanes',
         type: 'line',
         source: 'bikelanes',
+        // Draw lanes last so they sit on top of the pavement/road mesh rather
+        // than wherever they happen to fall in the edge list.
+        layout: { 'line-sort-key': ['match', ['get', 'kind'], 'foot', 0, 'bike', 3, 1] },
         paint: {
-          // Bike lanes in vine red, roads in blue, connectors amber (§10).
+          // Bike lanes in vine red, shared lanes in a washed-out red, roads in
+          // blue, pavements faint grey, connectors amber (§10).
           'line-color': [
             'match',
             ['get', 'kind'],
             'bike',
             BIKE_COLOR,
+            'shared',
+            SHARED_COLOR,
             'connector',
             CONNECTOR_COLOR,
+            'foot',
+            FOOT_COLOR,
             ROAD_COLOR,
           ],
-          'line-width': ['match', ['get', 'kind'], 'bike', 3, 1],
-          'line-opacity': ['match', ['get', 'kind'], 'bike', 0.9, 0.45],
+          'line-width': ['match', ['get', 'kind'], 'bike', 3, 'shared', 2, 'foot', 0.6, 1],
+          'line-opacity': ['match', ['get', 'kind'], 'bike', 0.9, 'shared', 0.75, 'foot', 0.3, 0.45],
         },
       });
     }
@@ -117,6 +142,16 @@ export class BikeMap {
   private addOverlays(): void {
     this.map.addSource('route', { type: 'geojson', data: EMPTY_FC });
     this.map.addSource('progress', { type: 'geojson', data: EMPTY_FC });
+    // Casing under the route. The route is coloured by surface with the *same*
+    // two colours as the bike-lane/road display layer it is drawn over, so
+    // without a casing it is indistinguishable from the network beneath it.
+    this.map.addLayer({
+      id: 'route-casing',
+      type: 'line',
+      source: 'route',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': CASING_COLOR, 'line-width': 11, 'line-opacity': 0.95 },
+    });
     this.map.addLayer({
       id: 'route',
       type: 'line',
@@ -163,8 +198,28 @@ export class BikeMap {
     if (geometry.coordinates.length > 1) {
       const b = new maplibregl.LngLatBounds();
       for (const c of geometry.coordinates) b.extend(c as [number, number]);
-      this.map.fitBounds(b, { padding: 60, maxZoom: 16 });
+      this.map.fitBounds(b, { padding: this.framePadding(), maxZoom: 16 });
     }
+  }
+
+  /**
+   * Padding for `fitBounds`, keeping the route and its markers clear of the
+   * control panel that floats over the map. Without it a fitted route is
+   * centred in the *container*, which puts the start or destination marker
+   * underneath the panel and invisible.
+   */
+  private framePadding(): maplibregl.PaddingOptions {
+    const base = 60;
+    const panel = document.getElementById('panel');
+    const container = this.map.getContainer().getBoundingClientRect();
+    if (!panel || panel.hidden || container.width === 0) {
+      return { top: base, bottom: base, left: base, right: base };
+    }
+    const rect = panel.getBoundingClientRect();
+    // Never claim more than 40% of the container, or fitBounds has nowhere left
+    // to put the route (the panel is full-width on a phone).
+    const left = Math.min(rect.right - container.left + 12, container.width * 0.4);
+    return { top: base, bottom: base, right: base, left: Math.max(base, left) };
   }
 
   setProgress(geometry: LineString | null): void {
